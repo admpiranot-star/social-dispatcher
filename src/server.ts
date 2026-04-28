@@ -10,6 +10,7 @@ import { createAuthMiddleware } from './api/middleware/auth';
 import { initReportScheduler, stopReportScheduler } from './reporting/scheduler';
 import { initMemoryTables } from './memory/manager';
 import { initMemoryScheduler, stopMemoryScheduler } from './memory/scheduler';
+import { initRampUp } from './revival/ramp-up';
 import { platformConfigs } from './config/platforms';
 import { webhookRouter } from './api/webhook-routes';
 import { engagementAggregator } from './engagement/aggregator';
@@ -92,6 +93,15 @@ export async function start() {
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       logger.warn({ error: errMsg }, 'Could not initialize report scheduler - continuing without auto-reports');
+    }
+
+    // Initialize ramp-up engine (dormant page revival)
+    try {
+      await initRampUp();
+      logger.info({}, 'Ramp-up engine initialized');
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logger.warn({ error: errMsg }, 'Could not initialize ramp-up engine — continuing without');
     }
 
     // Start BullMQ workers — Facebook + Instagram only (active platforms)

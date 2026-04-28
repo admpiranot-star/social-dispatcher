@@ -7,6 +7,7 @@ import { query } from '../db/client';
 import { Architect } from '../agent/specialists/architect';
 import { Strategist } from '../agent/specialists/strategist';
 import { queueStateManager } from '../queue/queue-state';
+import { rampUpEngine } from '../revival/ramp-up';
 import {
   routeArticle,
   calculatePageScheduleTime,
@@ -92,6 +93,23 @@ export class Dispatcher {
     // 5. Enqueue Facebook posts for each matched page
     for (const page of matchedPages) {
       try {
+        // === RAMP-UP CHECK ===
+        const hasExternalLink = payload.link && !payload.link.includes('piranot.com.br');
+        const rampDecision = await rampUpEngine.canPost(page, Boolean(hasExternalLink));
+
+        if (!rampDecision.allowed) {
+          logger.info(
+            { postId, pageName: page.name, phase: rampDecision.limit, reason: rampDecision.reason },
+            'RampUp: post bloqueado para esta página'
+          );
+          continue; // Skip this page, don't fail the whole dispatch
+        }
+
+        // For dormant/warming: strip link, post as native content only
+        const pagePayload: SocialPostPayload = rampDecision.limit.allowLinks
+          ? payload
+          : { ...payload, link: '' };
+
         // Calculate page-specific schedule time (stagger offset + windows)
         let pageScheduledAt = calculatePageScheduleTime(page, baseScheduledAt, priorityScore);
 
@@ -99,14 +117,17 @@ export class Dispatcher {
         pageScheduledAt = await this.enforceMinInterval(page, pageScheduledAt, isBreaking, priorityScore);
 
         const fbResult = await this.enqueueFacebookPost(
-          postId, page, payload, pageScheduledAt, priorityScore, correlationId
+          postId, page, pagePayload, pageScheduledAt, priorityScore, correlationId
         );
         results.push(fbResult);
+
+        // Increment daily counter for ramp-up tracking
+        rampUpEngine.incrementDailyCounter(page.id).catch(() => {});
 
         // 6. If page has Instagram linked AND Instagram is enabled, enqueue IG post
         if (page.instagram && platformConfigs.instagram.enabled) {
           const igResult = await this.enqueueInstagramPost(
-            postId, page, payload, pageScheduledAt, priorityScore, correlationId
+            postId, page, pagePayload, pageScheduledAt, priorityScore, correlationId
           );
           results.push(igResult);
         } else if (page.instagram) {
