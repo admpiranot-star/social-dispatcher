@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: social-dispatcher-db
+    environment:
+      POSTGRES_USER: social_user
+      POSTGRES_PASSWORD: social_password
+      POSTGRES_DB: social_dispatcher
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./src/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    networks:
+      - social-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: social-dispatcher-redis
+    ports:
+      - "6380:6379"
+    networks:
+      - social-net
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: social-dispatcher-app
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://social_user:social_password@postgres:5432/social_dispatcher
+      REDIS_URL: redis://redis:6379
+      PORT: 3302
+      LOG_LEVEL: debug
+      API_TOKEN: dev-token-change-in-production
+    ports:
+      - "3302:3302"
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - social-net
+    command: npm run dev
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: social-dispatcher-worker
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://social_user:social_password@postgres:5432/social_dispatcher
+      REDIS_URL: redis://redis:6379
+      LOG_LEVEL: debug
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - social-net
+    command: npm run worker:dev
+
+networks:
+  social-net:
+    driver: bridge

@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Environment files with SECRETS — NEVER COMMIT
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# PM2 logs
+.pm2/
+logs/
+
+# Docker volumes
+docker-data/
+
+# Test coverage
+coverage/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Temp files
+tmp/
+*.tmp
+
+# BullMQ Redis dump
+dump.rdb

@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PiraNOT Social Dispatcher - Dashboard</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+      color: #333;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    .header {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .header h1 {
+      color: #667eea;
+      margin-bottom: 5px;
+    }
+
+    .header .status {
+      display: flex;
+      gap: 20px;
+      margin-top: 10px;
+      font-size: 14px;
+    }
+
+    .status-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .status-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #27ae60;
+    }
+
+    .status-dot.disconnected {
+      background: #e74c3c;
+    }
+
+    .dashboard {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+
+    .platform-card {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .platform-card h2 {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 15px;
+      font-size: 18px;
+      color: #333;
+    }
+
+    .platform-card .queue-length {
+      font-size: 24px;
+      font-weight: bold;
+      color: #667eea;
+      margin-bottom: 15px;
+    }
+
+    .queue-items {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .queue-item {
+      background: #f8f9fa;
+      padding: 10px;
+      border-radius: 4px;
+      border-left: 4px solid #667eea;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .queue-item:hover {
+      background: #e8eaf6;
+      transform: translateX(4px);
+    }
+
+    .queue-item .title {
+      font-weight: 600;
+      font-size: 13px;
+      margin-bottom: 5px;
+      color: #333;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .queue-item .time {
+      font-size: 12px;
+      color: #666;
+    }
+
+    .queue-item .position {
+      display: inline-block;
+      background: #667eea;
+      color: white;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 11px;
+      font-weight: bold;
+    }
+
+    .notifications {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    .notifications h2 {
+      margin-bottom: 15px;
+      color: #333;
+    }
+
+    .notification {
+      padding: 10px;
+      margin-bottom: 10px;
+      border-radius: 4px;
+      border-left: 4px solid #f39c12;
+      background: #fffbf0;
+      font-size: 13px;
+    }
+
+    .notification.success {
+      border-left-color: #27ae60;
+      background: #f0fdf4;
+    }
+
+    .notification.error {
+      border-left-color: #e74c3c;
+      background: #fef2f2;
+    }
+
+    .notification.reprioritized {
+      border-left-color: #3498db;
+      background: #f0f8ff;
+    }
+
+    .notification .time {
+      color: #999;
+      font-size: 11px;
+      margin-top: 4px;
+    }
+
+    .trending {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      margin-top: 20px;
+    }
+
+    .trending h2 {
+      margin-bottom: 15px;
+      color: #333;
+    }
+
+    .trending-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 10px;
+      border-bottom: 1px solid #eee;
+      font-size: 13px;
+    }
+
+    .trending-item:last-child {
+      border-bottom: none;
+    }
+
+    .trend-badge {
+      background: #e74c3c;
+      color: white;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-weight: bold;
+    }
+
+    .controls {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .controls h2 {
+      margin-bottom: 15px;
+      color: #333;
+    }
+
+    .control-group {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      background: #667eea;
+      color: white;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+
+    button:hover {
+      background: #764ba2;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    @media (max-width: 768px) {
+      .dashboard {
+        grid-template-columns: 1fr;
+      }
+
+      .header .status {
+        flex-direction: column;
+      }
+    }
+
+    /* Scrollbar customization */
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #f1f1f1;
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #667eea;
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #764ba2;
+    }
+
+    .connection-status {
+      font-weight: bold;
+      color: #27ae60;
+    }
+
+    .connection-status.disconnected {
+      color: #e74c3c;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <h1>🚀 PiraNOT Social Dispatcher</h1>
+      <div class="status">
+        <div class="status-item">
+          <div class="status-dot" id="connectionDot"></div>
+          <span>Status:</span>
+          <span class="connection-status" id="connectionStatus">Conectando...</span>
+        </div>
+        <div class="status-item">
+          <span>Posts na fila:</span>
+          <span id="totalQueued">-</span>
+        </div>
+        <div class="status-item">
+          <span>Publicados:</span>
+          <span id="totalPublished">-</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+      <h2>Controles</h2>
+      <div class="control-group">
+        <button onclick="analyzeQueue()">📊 Analisar Fila</button>
+        <button onclick="refreshStats()">🔄 Atualizar</button>
+        <button onclick="viewAnalytics()">📈 Analytics</button>
+      </div>
+    </div>
+
+    <!-- Queue Boards -->
+    <div class="dashboard" id="dashboard"></div>
+
+    <!-- Trending Posts -->
+    <div class="trending">
+      <h2>🔥 Posts em Alta</h2>
+      <div id="trendingList">
+        <p style="color: #999;">Carregando...</p>
+      </div>
+    </div>
+
+    <!-- Notifications -->
+    <div class="notifications">
+      <h2>📢 Notificações</h2>
+      <div id="notificationsList">
+        <p style="color: #999;">Aguardando eventos...</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const PLATFORMS = {
+      facebook: '👍 Facebook',
+      instagram: '📸 Instagram',
+      whatsapp: '💬 WhatsApp',
+      tiktok: '▶️ TikTok',
+      twitter: '🐦 Twitter',
+      linkedin: '💼 LinkedIn',
+    };
+
+    const ICONS = {
+      facebook: '👍',
+      instagram: '📸',
+      whatsapp: '💬',
+      tiktok: '▶️',
+      twitter: '🐦',
+      linkedin: '💼',
+    };
+
+    let ws = null;
+    let notifications = [];
+    let queueStats = {};
+    let totalPublished = 0;
+
+    /**
+     * Conectar ao WebSocket server
+     */
+    function connect() {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}`;
+
+      ws = new WebSocket(wsUrl.replace('http', 'ws') + ':3001');
+
+      ws.onopen = () => {
+        console.log('✅ Conectado ao dashboard');
+        updateConnectionStatus(true);
+        requestQueueState();
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          handleMessage(message);
+        } catch (err) {
+          console.error('Erro ao parsear mensagem:', err);
+        }
+      };
+
+      ws.onerror = () => {
+        console.error('❌ Erro WebSocket');
+        updateConnectionStatus(false);
+      };
+
+      ws.onclose = () => {
+        console.log('Desconectado');
+        updateConnectionStatus(false);
+        setTimeout(connect, 3000);
+      };
+    }
+
+    /**
+     * Processar mensagens do servidor
+     */
+    function handleMessage(message) {
+      switch (message.type) {
+        case 'initial_state':
+        case 'queue_update':
+          updateQueueStats(message);
+          break;
+
+        case 'post_published':
+          addNotification(
+            `${message.icon} Publicado em ${message.channel}`,
+            'success',
+            'published'
+          );
+          totalPublished++;
+          break;
+
+        case 'post_reprioritized':
+          addNotification(
+            `${message.emoji} Post ${message.reason} (${message.oldPosition} → ${message.newPosition})`,
+            'info',
+            'reprioritized'
+          );
+          break;
+
+        case 'post_error':
+          addNotification(`${message.emoji} Erro em ${message.channel}: ${message.error}`, 'error');
+          break;
+
+        case 'high_engagement':
+          addNotification(
+            `${message.emoji} Alto engajamento em ${message.channel} (${message.engagementRate}%)`,
+            'success'
+          );
+          break;
+
+        case 'trending_posts':
+          updateTrending(message.posts);
+          break;
+      }
+    }
+
+    /**
+     * Atualizar estatísticas da fila
+     */
+    function updateQueueStats(message) {
+      if (message.type === 'queue_update') {
+        queueStats[message.channel] = {
+          length: message.queueLength,
+          topItems: message.topItems,
+        };
+      } else {
+        queueStats = message.queues || {};
+      }
+
+      renderDashboard();
+      updateTotalQueued();
+    }
+
+    /**
+     * Renderizar boards da fila
+     */
+    function renderDashboard() {
+      const dashboard = document.getElementById('dashboard');
+      dashboard.innerHTML = '';
+
+      for (const [platform, name] of Object.entries(PLATFORMS)) {
+        const stats = queueStats[platform] || { length: 0, topItems: [] };
+
+        const card = document.createElement('div');
+        card.className = 'platform-card';
+
+        // Create header (SAFE)
+        const header = document.createElement('h2');
+        const icon = document.createElement('span');
+        icon.textContent = ICONS[platform] || '📱';
+        header.appendChild(icon);
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = name;
+        header.appendChild(nameSpan);
+        card.appendChild(header);
+
+        // Create queue length (SAFE)
+        const lengthDiv = document.createElement('div');
+        lengthDiv.className = 'queue-length';
+        lengthDiv.textContent = stats.length + ' posts';
+        card.appendChild(lengthDiv);
+
+        // Create queue items (SAFE)
+        const itemsDiv = document.createElement('div');
+        itemsDiv.className = 'queue-items';
+
+        if (stats.topItems && stats.topItems.length > 0) {
+          stats.topItems.forEach((item) => {
+            const itemEl = document.createElement('div');
+            itemEl.className = 'queue-item';
+
+            const posSpan = document.createElement('span');
+            posSpan.className = 'position';
+            posSpan.textContent = '#' + item.position;
+            itemEl.appendChild(posSpan);
+
+            const titleDiv = document.createElement('div');
+            titleDiv.className = 'title';
+            titleDiv.textContent = item.postId.substring(0, 20) + '...';
+            itemEl.appendChild(titleDiv);
+
+            const timeDiv = document.createElement('div');
+            timeDiv.className = 'time';
+            timeDiv.textContent = '⏰ ' + new Date(item.scheduledAt).toLocaleTimeString('pt-BR');
+            itemEl.appendChild(timeDiv);
+
+            itemsDiv.appendChild(itemEl);
+          });
+        } else {
+          const emptyP = document.createElement('p');
+          emptyP.style.color = '#999';
+          emptyP.style.textAlign = 'center';
+          emptyP.style.padding = '20px';
+          emptyP.textContent = 'Fila vazia';
+          itemsDiv.appendChild(emptyP);
+        }
+
+        card.appendChild(itemsDiv);
+        dashboard.appendChild(card);
+      }
+    }
+
+    /**
+     * Atualizar total na fila
+     */
+    function updateTotalQueued() {
+      const total = Object.values(queueStats).reduce((sum, s) => sum + (s.length || 0), 0);
+      document.getElementById('totalQueued').textContent = total;
+    }
+
+    /**
+     * Adicionar notificação (SAFE: textContent instead of innerHTML)
+     */
+    function addNotification(message, type = 'info', icon = null) {
+      const notification = {
+        message,
+        type,
+        time: new Date().toLocaleTimeString('pt-BR'),
+      };
+
+      notifications.unshift(notification);
+      if (notifications.length > 20) notifications.pop();
+
+      const list = document.getElementById('notificationsList');
+      const notif = document.createElement('div');
+      notif.className = `notification ${type}`;
+
+      // Create message element safely
+      const msgEl = document.createElement('span');
+      msgEl.textContent = message;
+      notif.appendChild(msgEl);
+
+      // Create time element safely
+      const timeEl = document.createElement('div');
+      timeEl.className = 'time';
+      timeEl.textContent = notification.time;
+      notif.appendChild(timeEl);
+
+      if (list.children.length === 1 && list.children[0].textContent.includes('Aguardando')) {
+        list.innerHTML = '';
+      }
+
+      list.insertBefore(notif, list.firstChild);
+
+      // Som e badge
+      document.title = `(${notifications.length}) PiraNOT Dashboard`;
+    }
+
+    /**
+     * Atualizar trending posts (SAFE: DOM API instead of innerHTML)
+     */
+    function updateTrending(posts) {
+      const list = document.getElementById('trendingList');
+      list.innerHTML = ''; // Safe to clear
+
+      if (!posts || posts.length === 0) {
+        const p = document.createElement('p');
+        p.style.color = '#999';
+        p.textContent = 'Nenhum trending detectado';
+        list.appendChild(p);
+        return;
+      }
+
+      posts.forEach((post) => {
+        const item = document.createElement('div');
+        item.className = 'trending-item';
+
+        const idSpan = document.createElement('span');
+        idSpan.textContent = post.postId.substring(0, 20) + '...';
+        item.appendChild(idSpan);
+
+        const badge = document.createElement('span');
+        badge.className = 'trend-badge';
+        badge.textContent = post.totalEngagement + ' eng.';
+        item.appendChild(badge);
+
+        list.appendChild(item);
+      });
+    }
+
+    /**
+     * Requisitar estado completo da fila
+     */
+    function requestQueueState() {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(
+          JSON.stringify({
+            type: 'request_queue_state',
+            channel: 'all',
+          })
+        );
+
+        ws.send(
+          JSON.stringify({
+            type: 'request_trending',
+          })
+        );
+      }
+    }
+
+    /**
+     * Atualizar status de conexão
+     */
+    function updateConnectionStatus(connected) {
+      const dot = document.getElementById('connectionDot');
+      const status = document.getElementById('connectionStatus');
+
+      if (connected) {
+        dot.classList.remove('disconnected');
+        status.classList.remove('disconnected');
+        status.textContent = 'Conectado ✓';
+      } else {
+        dot.classList.add('disconnected');
+        status.classList.add('disconnected');
+        status.textContent = 'Desconectado ✗';
+      }
+    }
+
+    /**
+     * Analisar fila
+     */
+    function analyzeQueue() {
+      fetch('/queue/analyze', { method: 'POST', body: JSON.stringify({ channel: 'all' }) })
+        .then((r) => r.json())
+        .then((data) => {
+          addNotification('📊 Análise concluída', 'success');
+          console.log('Análise:', data);
+        })
+        .catch((err) => addNotification(`Erro: ${err.message}`, 'error'));
+    }
+
+    /**
+     * Atualizar estatísticas
+     */
+    function refreshStats() {
+      requestQueueState();
+      addNotification('🔄 Estatísticas atualizadas', 'success');
+    }
+
+    /**
+     * Ver analytics
+     */
+    function viewAnalytics() {
+      window.open('/analytics', '_blank');
+    }
+
+    document.getElementById('totalPublished').textContent = totalPublished;
+
+    // Conectar ao iniciar
+    connect();
+
+    // Auto-refresh a cada 30 segundos
+    setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        requestQueueState();
+      }
+    }, 30000);
+  </script>
+</body>
+</html>

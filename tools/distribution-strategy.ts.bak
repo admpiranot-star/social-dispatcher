@@ -1,0 +1,213 @@
+/**
+ * Distribution Strategy
+ * Lógica de qual post → qual conta, com pesos por categoria e tipo
+ */
+
+import { logger } from '../lib/logger';
+import { accountRegistry } from './account-registry';
+import { Account, SocialChannel, SocialPostPayload } from '../types';
+
+export class DistributionStrategy {
+  /**
+   * Determinar quais contas devem receber um post baseado em categoria e tipo
+   */
+  async getTargetAccounts(post: SocialPostPayload): Promise<Array<{ account: Account; weight: number }>> {
+    const targetAccounts: Array<{ account: Account; weight: number }> = [];
+
+    try {
+      // 1. Começar com contas principais (is_main = true) - sempre recebem
+      const mainAccounts = await accountRegistry.listMainAccounts();
+      for (const account of mainAccounts) {
+        targetAccounts.push({
+          account,
+          weight: account.distributionWeight,
+        });
+      }
+
+      // 2. Adicionar contas especializadas por categoria se houver
+      const categorySpecificAccounts = await accountRegistry.listByCategory(post.category);
+      for (const account of categorySpecificAccounts) {
+        // Evitar duplicatas
+        if (!targetAccounts.some((ta) => ta.account.id === account.id)) {
+          targetAccounts.push({
+            account,
+            weight: account.distributionWeight * 0.8, // 20% menos weight que contas main
+          });
+        }
+      }
+
+      logger.info(
+        {
+          postId: post.id,
+          category: post.category,
+          targetCount: targetAccounts.length,
+          channels: post.channels,
+        },
+        'Contas alvo determinadas'
+      );
+
+      return targetAccounts;
+    } catch (err: any) {
+      logger.error({ error: err.message, postId: post.id }, 'Erro ao determinar contas alvo');
+      throw err;
+    }
+  }
+
+  /**
+   * Filtrar contas por canais disponíveis no post
+   */
+  filterByChannel(
+    accounts: Array<{ account: Account; weight: number }>,
+    channels: SocialChannel[]
+  ): Array<{ account: Account; weight: number }> {
+    return accounts.filter((ta) =>
+      channels.some((ch) => {
+        // Mapear nomes de canais
+        if (ch === 'facebook' && ta.account.platform === 'facebook') return true;
+        if (ch === 'instagram' && ta.account.platform === 'instagram') return true;
+        if (ch === 'whatsapp' && ta.account.platform === 'facebook') return true; // WhatsApp via Facebook
+        if (ch === 'tiktok' && ta.account.platform === 'tiktok') return true;
+        if (ch === 'twitter' && ta.account.platform === 'twitter') return true;
+        if (ch === 'linkedin' && ta.account.platform === 'linkedin') return true;
+        return false;
+      })
+    );
+  }
+
+  /**
+   * Calcular prioridade de publicação para cada conta
+   * Posts com breaking news (priority > 8) vão para TODAS as contas
+   * Posts normais (priority 1-5) seguem a estratégia de categoria
+   */
+  calculatePriority(post: SocialPostPayload, account: Account, baseWeight: number): number {
+    let priorityScore = post.priority * baseWeight;
+
+    // Boost para contas principais
+    if (account.isMain) {
+      priorityScore *= 1.5;
+    }
+
+    // Boost para contas especializadas que matcham a categoria
+    if (account.categoryFocus === post.category) {
+      priorityScore *= 1.2;
+    }
+
+    return priorityScore;
+  }
+
+  /**
+   * Estratégia de distribuição: qual conta publica em qual hora
+   * Stories: todas as contas NA HORA
+   * Feed: main accounts 1º, depois specialized
+   * Links: staggered (espalhado ao longo do tempo)
+   */
+  async getPublicationSchedule(
+    post: SocialPostPayload,
+    targetAccounts: Array<{ account: Account; weight: number }>
+  ): Promise<
+    Array<{
+      account: Account;
+      channel: SocialChannel;
+      delayMs: number; // Quanto esperar antes de publicar
+      priority: number;
+    }>
+  > {
+    const schedules: Array<{
+      account: Account;
+      channel: SocialChannel;
+      delayMs: number;
+      priority: number;
+    }> = [];
+
+    const now = Date.now();
+    const isBreakingNews = post.priority > 8;
+    const isStory = post.metadata?.sourceId?.includes('story');
+
+    // Ordenar por prioridade
+    const sortedAccounts = targetAccounts.sort((a, b) => {
+      const priorityA = this.calculatePriority(post, a.account, a.weight);
+      const priorityB = this.calculatePriority(post, b.account, b.weight);
+      return priorityB - priorityA;
+    });
+
+    for (let i = 0; i < sortedAccounts.length; i++) {
+      const { account, weight } = sortedAccounts[i];
+      const priority = this.calculatePriority(post, account, weight);
+
+      // Determinar delay baseado em tipo de post
+      let delayMs = 0;
+
+      if (isStory || account.platform === 'instagram') {
+        // Stories: sair NA HORA para todas
+        delayMs = 0;
+      } else if (isBreakingNews) {
+        // Breaking news: todos saem rápido (2-5 min stagger entre contas)
+        delayMs = i * 120000; // 2 minutos entre cada conta
+      } else {
+        // Posts normais: main accounts primeiro, depois stagger
+        if (account.isMain) {
+          delayMs = 0; // Sair na hora
+        } else {
+          // Stagger especializada: 15-45 min entre contas
+          delayMs = (i - 1) * 900000; // 15 minutos entre contas
+        }
+      }
+
+      // Adicionar para cada canal disponível no post
+      for (const channel of post.channels) {
+        if (this.isAccountValidForChannel(account, channel)) {
+          schedules.push({
+            account,
+            channel,
+            delayMs,
+            priority,
+          });
+        }
+      }
+    }
+
+    return schedules;
+  }
+
+  /**
+   * Verificar se uma conta é válida para um channel específico
+   */
+  private isAccountValidForChannel(account: Account, channel: SocialChannel): boolean {
+    const platformChannelMap: Record<string, SocialChannel[]> = {
+      facebook: ['facebook', 'whatsapp'],
+      instagram: ['instagram'],
+      tiktok: ['tiktok'],
+      twitter: ['twitter'],
+      linkedin: ['linkedin'],
+    };
+
+    const validChannels = platformChannelMap[account.platform] || [];
+    return validChannels.includes(channel);
+  }
+
+  /**
+   * Distribuição por heatwave: publicar quando audiência está mais ativa
+   * Próxima feature (Phase 5)
+   */
+  async getOptimalScheduleByEngagementHistory(
+    post: SocialPostPayload
+  ): Promise<{
+    recommendedScheduledAt: Date;
+    expectedEngagement: number;
+    confidence: number;
+  }> {
+    // TODO: Implementar análise de histórico e machine learning
+    // Por enquanto, retornar scheduling simples
+
+    const now = new Date();
+    const scheduledAt = new Date(now.getTime() + 30 * 60000); // 30 min a partir de agora
+
+    return {
+      recommendedScheduledAt: scheduledAt,
+      expectedEngagement: 0.05, // 5%
+      confidence: 0.3, // Baixa confiança sem dados históricos
+    };
+  }
+}
+
+export const distributionStrategy = new DistributionStrategy();
