@@ -10,30 +10,33 @@ import { query } from '../../db/client';
 import { logger } from '../../lib/logger';
 import { SocialPostPayload, QueueState, AgentVote } from '../../types';
 import { engagementAggregator } from '../../engagement/aggregator';
-import { timingOptimizer } from '../../lib/timing-optimizer';
+import { bayesianOptimizer } from '../../ml/bayesian-optimizer';
 
 export class Strategist {
   /**
    * Avaliar novo post do ponto de vista estratégico
-   * - Consulta TimingOptimizer (ML) para hora ideal por categoria
+   * - Usa BayesianOptimizer (Thompson Sampling) para hora ideal por página+categoria
    * - Cai em fallback quando confiança < 0.3
    * - Considera posts similares na fila
    */
   async evaluatePost(post: SocialPostPayload): Promise<AgentVote> {
     try {
-      // 1. Obter timing ótimo do ML (usa histórico real do banco)
-      const optimalTiming = await timingOptimizer.getOptimalTiming(post.category);
+      // 1. Get pageId from metadata or default
+      const pageId = (post.metadata as any)?.pageId || 'default';
 
-      // 2. Calcular score de timing (0-10) baseado na hora atual vs ideal
+      // 2. Bayesian prediction for (pageId, category)
+      const prediction = await bayesianOptimizer.predict(pageId, post.category);
+
+      // 3. Calculate timing score (0-10) based on current hour vs optimal
       const now = new Date();
-      const timingScore = this.calculateTimingScore(now, optimalTiming.optimalHour);
+      const timingScore = this.calculateTimingScore(now, prediction.optimalHour);
 
-      // 3. Analisar se há posts similares na fila
+      // 4. Check for similar posts in queue
       const similarPostsInQueue = await this.findSimilarPostsInQueue(post.category);
 
       let score = timingScore;
       let rationale = `Timing score: ${timingScore}/10 para ${post.category} ` +
-        `(hora ideal: ${optimalTiming.optimalHour}h, confiança: ${(optimalTiming.confidence * 100).toFixed(0)}%)`;
+        `(hora ideal: ${prediction.optimalHour}h, confiança Bayesiana: ${(prediction.confidence * 100).toFixed(0)}%)`;
 
       // 4. Se há posts similares na fila, espaçar este
       if (similarPostsInQueue > 1) {
@@ -53,12 +56,12 @@ export class Strategist {
         rationale,
         metadata: {
           category: post.category,
-          optimalHour: optimalTiming.optimalHour,
+          optimalHour: prediction.optimalHour,
           currentHour: now.getHours(),
           similarPostsInQueue,
-          expectedEngagement: optimalTiming.expectedEngagementRate,
-          confidence: optimalTiming.confidence,
-          reason: optimalTiming.reason,
+          expectedEngagement: prediction.expectedEngagement,
+          confidence: prediction.confidence,
+          reason: 'Thompson Sampling (Bayesian)',
         },
       };
     } catch (err: any) {
@@ -134,10 +137,10 @@ export class Strategist {
    */
   private async getCategoryEngagementBaseline(channel: string): Promise<number> {
     try {
-      // Tentar usar ML para obter baseline real
-      const timing = await timingOptimizer.getOptimalTiming(channel);
-      if (timing.confidence > 0.5 && timing.expectedEngagementRate > 0) {
-        return timing.expectedEngagementRate;
+      // Try Bayesian prediction for this category (page-agnostic)
+      const prediction = await bayesianOptimizer.predict('default', channel);
+      if (prediction.confidence > 0.5 && prediction.expectedEngagement > 0) {
+        return prediction.expectedEngagement;
       }
 
       // Fallback: valores fixos quando não há dados suficientes

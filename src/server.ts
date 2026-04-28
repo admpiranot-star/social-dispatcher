@@ -14,6 +14,8 @@ import { initRampUp } from './revival/ramp-up';
 import { platformConfigs } from './config/platforms';
 import { webhookRouter } from './api/webhook-routes';
 import { engagementAggregator } from './engagement/aggregator';
+import { bayesianOptimizer } from './ml/bayesian-optimizer';
+import { socialDaemon } from './daemon/scheduler';
 
 const app = new Hono();
 
@@ -104,6 +106,15 @@ export async function start() {
       logger.warn({ error: errMsg }, 'Could not initialize ramp-up engine — continuing without');
     }
 
+    // Initialize Bayesian optimizer (ML timing engine)
+    try {
+      await bayesianOptimizer.init();
+      logger.info({}, 'Bayesian optimizer initialized');
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logger.warn({ error: errMsg }, 'Could not initialize Bayesian optimizer — continuing without ML timing');
+    }
+
     // Start BullMQ workers — Facebook + Instagram only (active platforms)
     try {
       const { facebookWorker } = await import('./workers/facebook.worker');
@@ -120,6 +131,15 @@ export async function start() {
     }
 
     logger.info({ port: config.PORT }, 'Starting Social Dispatcher');
+
+    // Start the 24/7 daemon (article curator + health monitors)
+    try {
+      await socialDaemon.start();
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logger.warn({ error: errMsg }, 'Could not start social daemon — continuing without autonomous cycles');
+    }
+
     return app;
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
