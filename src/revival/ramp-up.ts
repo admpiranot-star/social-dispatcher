@@ -220,18 +220,24 @@ export class RampUpEngine {
       cooldownUntil = cd ? new Date(cd) : null;
     }
 
-    // 3. Determinar fase
+    // 3. Determinar fase — USAR SEGUIDORES como critério principal
+    //    Páginas com audiência grande NÃO são dormant, mesmo sem posts no sistema.
+    //    Uma página de 156K seguidores é ACTIVE por natureza.
     let phase: RampUpPhase;
     if (forcedPhase) {
       phase = forcedPhase;
-    } else if (posts30d === 0) {
-      phase = 'dormant';
-    } else if (posts30d <= 7) {
-      phase = 'warming';
-    } else if (posts30d <= 30) {
+    } else if (page.followers >= 10000) {
+      // Páginas grandes: sempre active — podem postar 5x/dia com links
       phase = 'active';
+    } else if (page.followers >= 2000) {
+      // Páginas médias: warming se nunca postamos, active se já postamos
+      phase = posts30d > 0 ? 'active' : 'warming';
+    } else if (page.followers >= 500) {
+      // Páginas pequenas: warming prudente
+      phase = 'warming';
     } else {
-      phase = 'saturated';
+      // Páginas muito novas/tiny: dormant
+      phase = 'dormant';
     }
 
     // 4. Definir limites por fase
@@ -396,10 +402,10 @@ const PHASE_LIMITS: Record<RampUpPhase, PhaseLimits> = {
     allowExternalLinks: false,
   },
   warming: {
-    maxPostsPerDay: 2,
+    maxPostsPerDay: 3,
     minIntervalMinutes: 60, // 1 hora
-    allowLinks: false,       // apenas links p/ piranot.com.br
-    allowExternalLinks: false,
+    allowLinks: true,        // links p/ piranot.com.br são OK
+    allowExternalLinks: false, // links p/ fora = não
   },
   active: {
     maxPostsPerDay: 5,
