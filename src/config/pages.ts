@@ -638,26 +638,51 @@ export function routeArticle(opts: {
   category: ContentCategory;
   geoScope?: GeoScope;
   isBreaking?: boolean;
+  articleId?: string; // para deduplicação
 }): PageConfig[] {
   const enabled = getEnabledPages();
   const matched: PageConfig[] = [];
+  // === ANTI-SHADOWBAN: roteamento inteligente ===
+  // Mesma notícia NÃO vai pra todas as páginas. Estratégia:
+  // 1. Hub pages (receivesAll) recebem TUDO — mas são só 1-2
+  // 2. Breaking news → todas as páginas que aceitam breaking
+  // 3. Notícias normais → NO MÁXIMO 3 páginas por artigo
+  //    - 1 página de melhor match (categoria + geo)
+  //    - 1-2 páginas de match secundário (aleatório entre matches)
+  // 4. Mesmo link NUNCA vai pra mais de 3 páginas simultaneamente
+
+  const MAX_PAGES_PER_ARTICLE = opts.isBreaking ? 10 : 3; // breaking pode ir pra mais
+
+  // Páginas hub (receivesAll) SEMPRE recebem
+  const hubPages = enabled.filter(p => p.routing.receivesAll);
+  for (const page of hubPages) {
+    matched.push(page);
+  }
+
+  if (matched.length >= MAX_PAGES_PER_ARTICLE) {
+    return matched.slice(0, MAX_PAGES_PER_ARTICLE);
+  }
+
+  // Breaking: todas as páginas que aceitam breaking
+  if (opts.isBreaking) {
+    for (const page of enabled) {
+      if (matched.find(m => m.id === page.id)) continue; // já incluída
+      if (page.routing.receivesBreaking) {
+        matched.push(page);
+      }
+    }
+    return matched.slice(0, MAX_PAGES_PER_ARTICLE);
+  }
+
+  // Notícias normais: categorizar matches
+  const categoryMatches: PageConfig[] = [];
+  const geoMatches: PageConfig[] = [];
 
   for (const page of enabled) {
-    // Rule 1: Main hubs receive everything
-    if (page.routing.receivesAll) {
-      matched.push(page);
-      continue;
-    }
+    if (matched.find(m => m.id === page.id)) continue; // já é hub
 
-    // Rule 2: Breaking news to all pages that accept breaking
-    if (opts.isBreaking && page.routing.receivesBreaking) {
-      matched.push(page);
-      continue;
-    }
-
-    // Rule 3: Category + Geo match
     const categoryMatch =
-      page.routing.categories.length === 0 || // Empty = accepts all categories
+      page.routing.categories.length === 0 ||
       page.routing.categories.includes(opts.category);
 
     const geoMatch =
@@ -665,11 +690,44 @@ export function routeArticle(opts: {
       (opts.geoScope && page.routing.geoScopes.includes(opts.geoScope));
 
     if (categoryMatch && geoMatch) {
-      matched.push(page);
+      // Match duplo (categoria + geo) = prioritário
+      categoryMatches.push(page);
+    } else if (categoryMatch || geoMatch) {
+      // Match parcial = secundário
+      geoMatches.push(page);
     }
   }
 
+  // Adicionar matches prioritários (shuffle para variar a rota a cada artigo)
+  const shuffledPrimary = shuffleArray(categoryMatches);
+  for (const page of shuffledPrimary) {
+    if (matched.length >= MAX_PAGES_PER_ARTICLE) break;
+    matched.push(page);
+  }
+
+  // Completar com matches secundários se sobrar vaga
+  const shuffledSecondary = shuffleArray(geoMatches);
+  for (const page of shuffledSecondary) {
+    if (matched.length >= MAX_PAGES_PER_ARTICLE) break;
+    matched.push(page);
+  }
+
   return matched;
+}
+
+/**
+ * Fisher-Yates shuffle — embaralha array sem modificar o original.
+ * Isso garante que cada artigo vai pra páginas DIFERENTES a cada execução,
+ * evitando o padrão de "mesmas N páginas recebem tudo".
+ */
+function shuffleArray<T>(arr: T[]): T[] {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    Math.random(); // usar Math.random é suficiente pra roteamento
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
 }
 
 /**

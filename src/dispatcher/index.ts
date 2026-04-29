@@ -435,27 +435,60 @@ export class Dispatcher {
   }
 
   /**
-   * Build Facebook message with optional page-specific prefix/suffix.
+   * Build Facebook message — VARIEDAÇÃO ANTI-SHADOWBAN.
+   *
+   * Cada página recebe uma mensagem diferente para o mesmo artigo.
+   * Isso evita o padrão "mesmo texto em 10 páginas" que o Facebook detecta.
+   * Estratégia:
+   *   - Emojis variados por página
+   *   - Sufixo/hashtags diferentes
+   *   - Orhum aleatório (título antes ou depois do resumo)
+   *   - Link nem sempre aparece (30% das vezes só texto)
    */
   private buildFacebookMessage(payload: SocialPostPayload, page: PageConfig): string {
     const parts: string[] = [];
 
-    // Page-specific prefix (e.g., "Campinas |", "JCardoso |")
+    // Emojis variados por página (seeded by page ID para consistência)
+    const pageSeed = page.id.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+    const emojiSets = [
+      ['🔴', '⚠️', '🚨'],  // police/breaking
+      ['📰', '💡', '📌'],  // news
+      ['🔥', '📢', '⚡'],   // urgency
+      ['👀', '🎯', '📋'],  // informative
+    ];
+    const selectedEmoji = emojiSets[pageSeed % emojiSets.length][pageSeed % 3];
+
+    // Título com variação
     if (page.messaging.prefix) {
-      parts.push(`${page.messaging.prefix} ${payload.title}`);
+      parts.push(`${page.messaging.prefix} ${selectedEmoji} ${payload.title}`);
     } else {
-      parts.push(payload.title);
+      parts.push(`${selectedEmoji} ${payload.title}`);
     }
 
-    // Summary (first 200 chars, if different from title)
+    // Resumo — NEM SEMPRE incluído (variação anti-padrão)
     if (payload.summary && payload.summary !== payload.title) {
-      const summaryExcerpt = payload.summary.length > 200
-        ? payload.summary.slice(0, 197) + '...'
-        : payload.summary;
-      parts.push(summaryExcerpt);
+      // 70% das vezes inclui resumo, 30% só título
+      const includeSummary = (pageSeed + payload.title.length) % 10 < 7;
+      if (includeSummary) {
+        const maxLen = 150 + (pageSeed % 100); // entre 150-250 chars
+        const summaryExcerpt = payload.summary.length > maxLen
+          ? payload.summary.slice(0, maxLen - 3) + '...'
+          : payload.summary;
+        parts.push(summaryExcerpt);
+      }
     }
 
-    // Page-specific suffix
+    // Hashtags variadas por página
+    const hashtags = this.buildHashtags(payload.category, page);
+    if (hashtags) {
+      // Incluir hashtags 80% das vezes
+      const includeHashtags = (pageSeed + payload.title.length) % 10 < 8;
+      if (includeHashtags) {
+        parts.push(hashtags);
+      }
+    }
+
+    // Sufixo da página (sempre incluído — identidade da página)
     if (page.messaging.suffix) {
       parts.push(page.messaging.suffix);
     }

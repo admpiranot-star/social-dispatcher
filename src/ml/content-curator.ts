@@ -61,8 +61,8 @@ export interface CuratorStats {
 // =====================================================================
 
 const DEFAULT_CONFIG: CuratorConfig = {
-  maxArticles: 20,
-  minFetchIntervalMinutes: 15,
+  maxArticles: 60,       // 60 notícias/dia (meta de escala nacional)
+  minFetchIntervalMinutes: 10,  // buscar a cada 10min (era 15)
   wpApiUrl: 'https://piranot.com.br/wp-json/wp/v2',
   categoryMap: {
     'entretenimento': 'entertainment', 'fofoca-famosos': 'entertainment',

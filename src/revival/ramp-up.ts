@@ -227,11 +227,13 @@ export class RampUpEngine {
     if (forcedPhase) {
       phase = forcedPhase;
     } else if (page.followers >= 10000) {
-      // Páginas grandes: sempre active — podem postar 5x/dia com links
-      phase = 'active';
+      // Páginas grandes: active ou saturated, dependendo do volume
+      phase = posts30d >= 30 ? 'saturated' : 'active';
     } else if (page.followers >= 2000) {
-      // Páginas médias: warming se nunca postamos, active se já postamos
-      phase = posts30d > 0 ? 'active' : 'warming';
+      // Páginas médias: warming → active → saturated conforme cresce
+      if (posts30d >= 15) phase = 'saturated';
+      else if (posts30d > 0 || page.followers >= 5000) phase = 'active';
+      else phase = 'warming';
     } else if (page.followers >= 500) {
       // Páginas pequenas: warming prudente
       phase = 'warming';
@@ -402,19 +404,19 @@ const PHASE_LIMITS: Record<RampUpPhase, PhaseLimits> = {
     allowExternalLinks: false,
   },
   warming: {
-    maxPostsPerDay: 3,
+    maxPostsPerDay: 5,
     minIntervalMinutes: 60, // 1 hora
     allowLinks: true,        // links p/ piranot.com.br são OK
-    allowExternalLinks: false, // links p/ fora = não
+    allowExternalLinks: false,
   },
   active: {
-    maxPostsPerDay: 5,
+    maxPostsPerDay: 15,
     minIntervalMinutes: 30,
     allowLinks: true,
     allowExternalLinks: true,
   },
   saturated: {
-    maxPostsPerDay: 10,
+    maxPostsPerDay: 30,
     minIntervalMinutes: 15,
     allowLinks: true,
     allowExternalLinks: true,

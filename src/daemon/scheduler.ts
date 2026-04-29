@@ -93,8 +93,8 @@ export class SocialDaemon {
 
     // Install periodic cycles
     this.timers.push(
-      // ARTICLE FETCH: every 15 minutes
-      setInterval(() => this.articleFetchCycle(), 15 * 60_000),
+      // ARTICLE FETCH: every 10 minutes (60 articles/day target)
+      setInterval(() => this.articleFetchCycle(), 10 * 60_000),
       
       // ML UPDATE: every 1 hour
       setInterval(() => this.mlUpdateCycle(), 60 * 60_000),
