@@ -16,6 +16,7 @@ import { webhookRouter } from './api/webhook-routes';
 import { engagementAggregator } from './engagement/aggregator';
 import { bayesianOptimizer } from './ml/bayesian-optimizer';
 import { socialDaemon } from './daemon/scheduler';
+import { query } from './db/client';
 
 const app = new Hono();
 
@@ -113,6 +114,44 @@ export async function start() {
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       logger.warn({ error: errMsg }, 'Could not initialize Bayesian optimizer — continuing without ML timing');
+    }
+
+    // Initialize engagement tables (post_metrics, page_metrics)
+    try {
+      await query(`
+        CREATE TABLE IF NOT EXISTS post_metrics (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          platform_post_id VARCHAR(255) NOT NULL,
+          page_id VARCHAR(255) NOT NULL,
+          page_name VARCHAR(255),
+          reactions INTEGER DEFAULT 0,
+          comments INTEGER DEFAULT 0,
+          shares INTEGER DEFAULT 0,
+          clicks INTEGER DEFAULT 0,
+          engagement_rate FLOAT DEFAULT 0,
+          created_at TIMESTAMPTZ NOT NULL,
+          fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_post_metrics_page_id ON post_metrics (page_id);
+        CREATE INDEX IF NOT EXISTS idx_post_metrics_fetched_at ON post_metrics (fetched_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_post_metrics_engagement ON post_metrics (engagement_rate DESC);
+
+        CREATE TABLE IF NOT EXISTS page_metrics (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          page_id VARCHAR(255) NOT NULL,
+          page_name VARCHAR(255),
+          followers INTEGER DEFAULT 0,
+          impressions INTEGER DEFAULT 0,
+          post_impressions INTEGER DEFAULT 0,
+          fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_page_metrics_page_id ON page_metrics (page_id);
+        CREATE INDEX IF NOT EXISTS idx_page_metrics_fetched_at ON page_metrics (fetched_at DESC);
+      `);
+      logger.info({}, 'Engagement tables initialized');
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logger.warn({ error: errMsg }, 'Could not create engagement tables — continuing without');
     }
 
     // Start BullMQ workers — Facebook + Instagram only (active platforms)

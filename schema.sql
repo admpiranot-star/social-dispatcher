@@ -130,3 +130,40 @@ CREATE INDEX IF NOT EXISTS idx_reprioritization_log_reason ON reprioritization_l
 
 CREATE INDEX IF NOT EXISTS idx_social_accounts_extended_category_focus ON social_accounts_extended (category_focus);
 CREATE INDEX IF NOT EXISTS idx_social_accounts_extended_is_main ON social_accounts_extended (is_main);
+
+-- =====================================================================
+-- Engagement Reciler: métricas de posts e páginas para o loop MEDIR → APRENDER
+-- =====================================================================
+
+CREATE TABLE IF NOT EXISTS post_metrics (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  platform_post_id VARCHAR(255) NOT NULL,
+  page_id VARCHAR(255) NOT NULL,
+  page_name VARCHAR(255),
+  reactions INTEGER DEFAULT 0,
+  comments INTEGER DEFAULT 0,
+  shares INTEGER DEFAULT 0,
+  clicks INTEGER DEFAULT 0,
+  engagement_rate FLOAT DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL,
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(platform_post_id, fetched_at::date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_post_metrics_page_id ON post_metrics (page_id);
+CREATE INDEX IF NOT EXISTS idx_post_metrics_fetched_at ON post_metrics (fetched_at DESC);
+CREATE INDEX IF NOT EXISTS idx_post_metrics_engagement ON post_metrics (engagement_rate DESC);
+
+CREATE TABLE IF NOT EXISTS page_metrics (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  page_id VARCHAR(255) NOT NULL,
+  page_name VARCHAR(255),
+  followers INTEGER DEFAULT 0,
+  impressions INTEGER DEFAULT 0,
+  post_impressions INTEGER DEFAULT 0,
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(page_id, fetched_at::date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_page_metrics_page_id ON page_metrics (page_id);
+CREATE INDEX IF NOT EXISTS idx_page_metrics_fetched_at ON page_metrics (fetched_at DESC);

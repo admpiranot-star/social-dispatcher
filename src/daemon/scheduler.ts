@@ -21,6 +21,7 @@ import { contentCurator } from '../ml/content-curator';
 import { bayesianOptimizer } from '../ml/bayesian-optimizer';
 import { dispatcher } from '../dispatcher';
 import { recomputeTimingPatterns, auditBias } from '../memory/manager';
+import { engagementReciler } from '../engagement/engagement-reciler';
 
 // =====================================================================
 // Tipos
@@ -99,6 +100,9 @@ export class SocialDaemon {
       // ML UPDATE: every 1 hour
       setInterval(() => this.mlUpdateCycle(), 60 * 60_000),
       
+      // ENGAGEMENT RECILER: every 30 minutes (MEDIR → APRENDER)
+      setInterval(() => this.engagementCycle(), 30 * 60_000),
+      
       // BIAS AUDIT: every 6 hours
       setInterval(() => this.biasAuditCycle(), 6 * 60 * 60_000),
       
@@ -115,9 +119,12 @@ export class SocialDaemon {
     // Run first health check
     setTimeout(() => this.healthCheckCycle(), 10000);
 
+    // Run first engagement recile immediately
+    setTimeout(() => this.engagementCycle(), 15000);
+
     logger.info(
-      { cycles: ['article(15m)', 'ml(1h)', 'audit(6h)', 'health(5m)', 'report(24h)'] },
-      '✅ Social Daemon started — 5 cycles installed'
+      { cycles: ['article(10m)', 'ml(1h)', 'engagement(30m)', 'audit(6h)', 'health(5m)', 'report(24h)'] },
+      '✅ Social Daemon started — 6 cycles installed'
     );
   }
 
@@ -261,6 +268,29 @@ export class SocialDaemon {
       }
     } catch (err: any) {
       logger.error({ error: err.message }, 'Daemon: erro no bias audit');
+    }
+  }
+
+  /**
+   * Engagement reciler cycle — MEDIR → APRENDER → AJUSTAR.
+   * Busca métricas de posts e páginas no Facebook,
+   * calcula engagement rate, e alimenta o BayesianOptimizer.
+   */
+  private async engagementCycle(): Promise<void> {
+    try {
+      // 1. Buscar métricas de posts (reactions, comments, shares)
+      await engagementReciler.fetchPostMetrics();
+
+      // 2. Buscar métricas de página (followers, impressions)
+      await engagementReciler.fetchPageMetrics();
+
+      // 3. Verificar promoções de ramp-up
+      await engagementReciler.checkRampUpPromotions();
+
+      this.state.lastBiasAudit = new Date();
+      logger.info({}, 'Daemon: ciclo de engagement concluído');
+    } catch (err: any) {
+      logger.error({ error: err.message }, 'Daemon: erro no engagement cycle');
     }
   }
 
