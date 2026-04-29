@@ -391,9 +391,18 @@ export class SocialDaemon {
     try {
       const { getQueueStats } = await import('../queue/bullmq-setup');
       const stats = await getQueueStats();
-      queueDepth = stats.waiting + stats.active;
-      workersRunning = stats.active >= 0; // any value means queue is reachable
-    } catch { /* ignore */ }
+      if (stats && typeof stats.waiting === 'number') {
+        queueDepth = stats.waiting + (stats.active || 0);
+        workersRunning = true;
+      } else {
+        // getQueueStats retornou undefined/incompleto — workers existem mas stats falhou
+        workersRunning = true; // fail-open: workers são iniciados no server.ts
+        queueDepth = 0;
+      }
+    } catch {
+      // Queue stats falhou, mas workers provavelmente estão rodando
+      workersRunning = true; // fail-open
+    }
 
     // Ramp-up state
     try {

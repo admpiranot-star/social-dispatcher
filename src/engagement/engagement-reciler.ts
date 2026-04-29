@@ -4,12 +4,16 @@
  * Ciclo: PUBLICAR → MEDIR (este módulo) → APRENDER (BayesianOptimizer) → AJUSTAR
  *
  * O que faz:
- * 1. A cada 30min: busca reactions/comments/shares dos últimos 100 posts
- * 2. A cada 1h: busca métricas de página (impressions, followers)
- * 3. Calcula engagement rate = (reactions + comments + shares) / reach
+ * 1. A cada 30min: busca reactions/comments/shares dos últimos 25 posts por página
+ * 2. A cada 1h: busca métricas de página (followers, impressions)
+ * 3. Calcula engagement rate = (reactions + comments + shares) / reach estimado
  * 4. Alimenta o BayesianOptimizer: update(pageId, category, hour, reward)
  * 5. Alimenta o RampUpEngine: se engagement subindo, sobe de fase
- * 6. Persiste tudo em DB para o dashboard
+ * 6. Persiste tudo em DB para o dashboard e para o Nexus Publisher (ML futuro)
+ *
+ * NOTA: colunas do DB usam nomes sem aspas (followers, reactions etc. NÃO são
+ * palavras reservadas no PostgreSQL 15+). O bug anterior era SQL malformado
+ * (ON CONFLICT DO NOTHING seguido de SET), não palavras reservadas.
  */
 
 import { query } from '../db/client';
@@ -22,7 +26,6 @@ import { getEnabledPages, type PageConfig } from '../config/pages';
 // =====================================================================
 
 interface PostMetrics {
-  postId: string;
   platformPostId: string;
   pageId: string;
   pageName: string;
@@ -32,16 +35,14 @@ interface PostMetrics {
   clicks: number;
   engagementRate: number;
   createdAt: Date;
-  fetchedAt: Date;
 }
 
 interface PageMetrics {
   pageId: string;
   pageName: string;
-  followers: number;
+  followerCount: number;
   impressions: number;
   postImpressions: number;
-  fetchedAt: Date;
 }
 
 interface RecilerStats {
@@ -82,17 +83,14 @@ export class EngagementReciler {
       if (!page.pageToken) continue;
 
       try {
-        // Buscar últimos 25 posts da página via API
         const metrics = await this.fetchPagePostsMetrics(page);
         totalFetched += metrics.length;
 
-        // Atualizar cada post no DB
         for (const m of metrics) {
           await this.updatePostMetrics(m);
           totalUpdated++;
         }
 
-        // Alimentar BayesianOptimizer
         await this.feedBayesianLearner(metrics);
       } catch (err: any) {
         this.stats.errors++;
@@ -126,16 +124,11 @@ export class EngagementReciler {
         const metrics = await this.fetchSinglePageMetrics(page);
         pagesFetched++;
 
-        // Persistir métricas de página
+        // INSERT simples — uma linha por fetch (sem ON CONFLICT complexo)
         await query(
           `INSERT INTO page_metrics (page_id, page_name, followers, impressions, post_impressions, fetched_at)
-           VALUES ($1, $2, $3, $4, $5, NOW())
-           ON CONFLICT DO NOTHING
-             followers = EXCLUDED.followers,
-             impressions = EXCLUDED.impressions,
-             post_impressions = EXCLUDED.post_impressions,
-             fetched_at = NOW()`,
-          [metrics.pageId, metrics.pageName, metrics.followers, metrics.impressions, metrics.postImpressions]
+           VALUES ($1, $2, $3, $4, $5, NOW())`,
+          [metrics.pageId, metrics.pageName, metrics.followerCount, metrics.impressions, metrics.postImpressions]
         ).catch((err: any) => {
           logger.warn({ error: err.message, pageId: metrics.pageId }, 'EngagementReciler: erro ao salvar page_metrics');
         });
@@ -152,6 +145,11 @@ export class EngagementReciler {
   /**
    * Verificar se páginas devem subir de fase no ramp-up.
    * Roda a cada 6 horas.
+   * 
+   * Atualmente só loga — a transição real é automática via computeState()
+   * no ramp-up engine (que usa followers + post count).
+   * No futuro, quando tivermos dados suficientes, o engagement rate
+   * real vai pesar na decisão de promoção.
    */
   async checkRampUpPromotions(): Promise<void> {
     const pages = getEnabledPages();
@@ -159,7 +157,6 @@ export class EngagementReciler {
 
     for (const page of pages) {
       try {
-        // Buscar engagement médio dos últimos 7 dias
         const result = await query(
           `SELECT AVG(engagement_rate) as avg_rate
            FROM post_metrics
@@ -170,16 +167,18 @@ export class EngagementReciler {
 
         const avgRate = parseFloat(result.rows[0]?.avg_rate || '0');
 
-        // Buscar followers atuais
-        const fbMetrics = await this.fetchSinglePageMetrics(page);
-        const followers = fbMetrics.followers;
+        // Buscar followers sem chamar API de novo (usa DB)
+        const followerResult = await query(
+          `SELECT followers FROM page_metrics WHERE page_id = $1 ORDER BY fetched_at DESC LIMIT 1`,
+          [page.id]
+        );
+        const followerCount = parseInt(followerResult.rows[0]?.followers || '0');
 
         // Lógica de promoção:
-        // - se avgRate > 2% e followers > 5K → pode subir pra active
-        // - se avgRate > 5% e followers > 10K → pode subir pra saturated
-        // Por enquanto só logamos — a transição real é automática via computeState()
-        if (avgRate > 0.02 && followers >= 5000) {
-          logger.info({ pageId: page.id, pageName: page.name, avgRate: (avgRate * 100).toFixed(2) + '%', followers }, 'EngagementReciler: página elegível para promoção');
+        // - se avgRate > 2% e followers > 5K → elegível pra active
+        // - se avgRate > 5% e followers > 10K → elegível pra saturated
+        if (avgRate > 0.02 && followerCount >= 5000) {
+          logger.info({ pageId: page.id, pageName: page.name, avgRate: (avgRate * 100).toFixed(2) + '%', followerCount }, 'EngagementReciler: página elegível para promoção');
           promotions++;
         }
       } catch (err: any) {
@@ -195,11 +194,8 @@ export class EngagementReciler {
   /**
    * Retorna estatísticas para o dashboard.
    */
-  getStats(): RecilerStats & { topPosts: any[] } {
-    return {
-      ...this.stats,
-      topPosts: [],  // preenchido pelo dashboard via DB
-    };
+  getStats(): RecilerStats {
+    return { ...this.stats };
   }
 
   // =====================================================================
@@ -208,7 +204,6 @@ export class EngagementReciler {
 
   /**
    * Buscar métricas dos últimos 25 posts de uma página via Facebook API.
-   * Usa o endpoint /page_id/feed com fields=reactions,comments,shares
    */
   private async fetchPagePostsMetrics(page: PageConfig): Promise<PostMetrics[]> {
     const url = `https://graph.facebook.com/v21.0/${page.id}/feed?`
@@ -229,7 +224,7 @@ export class EngagementReciler {
     }
 
     const data = await response.json() as any;
-    const posts = data.data || [];
+    const posts: any[] = data.data || [];
     const results: PostMetrics[] = [];
 
     for (const post of posts) {
@@ -237,24 +232,22 @@ export class EngagementReciler {
       const comments = post.comments?.summary?.total_count || 0;
       const shares = post.shares?.count || 0;
 
-      // Engagement rate heurístico (sem reach real, usamos heurística)
-      // Se temos >0 engagement, estimamos reach como engagement * 20 (regra Facebook média)
+      // Engagement rate: se temos engagement, estimamos reach como engagement * 20
+      // (regra empírica do Facebook: engagement rate orgânico ~5%)
       const totalEngagement = reactions + comments + shares;
       const estimatedReach = Math.max(totalEngagement * 20, 1);
       const engagementRate = totalEngagement / estimatedReach;
 
       results.push({
-        postId: '',  // será preenchido pelo DB lookup
         platformPostId: post.id,
         pageId: page.id,
         pageName: page.name,
         reactions,
         comments,
         shares,
-        clicks: 0, // API não fornece clicks diretamente
+        clicks: 0,
         engagementRate,
         createdAt: new Date(post.created_time),
-        fetchedAt: new Date(),
       });
     }
 
@@ -265,7 +258,6 @@ export class EngagementReciler {
    * Buscar métricas de uma página (followers, impressions).
    */
   private async fetchSinglePageMetrics(page: PageConfig): Promise<PageMetrics> {
-    // Followers direto (funciona sem app review)
     const pageUrl = `https://graph.facebook.com/v21.0/${page.id}?`
       + `fields=followers_count,fan_count,name`
       + `&access_token=${page.pageToken}`;
@@ -274,6 +266,10 @@ export class EngagementReciler {
       headers: { 'User-Agent': 'PiraNOT-Dispatcher/2.0' },
       signal: AbortSignal.timeout(10000),
     });
+
+    if (!pageResponse.ok) {
+      throw new Error(`Facebook API ${pageResponse.status}: ${pageResponse.statusText}`);
+    }
 
     const pageData = await pageResponse.json() as any;
 
@@ -306,15 +302,15 @@ export class EngagementReciler {
     return {
       pageId: page.id,
       pageName: pageData.name || page.name,
-      followers: pageData.followers_count || pageData.fan_count || page.followers || 0,
+      followerCount: pageData.followers_count || pageData.fan_count || page.followers || 0,
       impressions,
       postImpressions,
-      fetchedAt: new Date(),
     };
   }
 
   /**
    * Atualizar métricas de um post no DB.
+   * INSERT puro — dados acumulam para análise temporal.
    */
   private async updatePostMetrics(metrics: PostMetrics): Promise<void> {
     try {
@@ -329,29 +325,21 @@ export class EngagementReciler {
           metrics.reactions, metrics.comments, metrics.shares, metrics.clicks,
           metrics.engagementRate, metrics.createdAt,
         ]
-      ).catch((err: any) => {
-        logger.warn({ error: err.message, postId: metrics.platformPostId }, 'EngagementReciler: erro ao salvar post_metrics');
-      });
+      );
     } catch (err: any) {
-      // Silencioso — métricas são best-effort
+      // Best-effort — não logar como warn cada erro individual (muito ruidoso)
+      this.stats.errors++;
     }
   }
 
   /**
    * Alimentar o BayesianOptimizer com os dados de engagement.
    * Esta é a conexão MEDIR → APRENDER.
-   * 
-   * Para cada post, determina:
-   * - Qual hora foi publicado
-   * - Qual categoria (police, economy, etc.)
-   * - Qual página
-   * - Reward = engagement rate normalizado (0 a 1)
    */
   private async feedBayesianLearner(metrics: PostMetrics[]): Promise<void> {
     for (const m of metrics) {
-      if (m.engagementRate <= 0) continue; // Sem engagement, não aprende
+      if (m.engagementRate <= 0) continue;
 
-      // Buscar a categoria do post no DB
       try {
         const postResult = await query(
           `SELECT category FROM posts WHERE platform_post_id = $1 LIMIT 1`,
@@ -366,16 +354,10 @@ export class EngagementReciler {
         // Engagement rate < 0.5% = fraco (reward=0.1)
         const reward = Math.min(1, Math.max(0.05, m.engagementRate * 20));
 
-        await bayesianOptimizer.update(
-          m.pageId,
-          category,
-          hour,
-          reward,
-        );
-
+        await bayesianOptimizer.update(m.pageId, category, hour, reward);
         this.stats.bayesUpdates++;
       } catch {
-        // Post pode não estar no DB (criado por outro sistema)
+        // Post pode não estar no DB — silencioso
       }
     }
   }

@@ -122,7 +122,9 @@ export class Dispatcher {
         results.push(fbResult);
 
         // Increment daily counter for ramp-up tracking
-        rampUpEngine.incrementDailyCounter(page.id).catch(() => {});
+        rampUpEngine.incrementDailyCounter(page.id).catch((err: any) => {
+          logger.debug({ pageId: page.id, error: err?.message }, 'Dispatcher: ramp-up counter failed (non-critical)');
+        });
 
         // 6. If page has Instagram linked AND Instagram is enabled, enqueue IG post
         if (page.instagram && platformConfigs.instagram.enabled) {

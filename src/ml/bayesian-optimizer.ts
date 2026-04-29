@@ -90,7 +90,9 @@ export class BayesianOptimizer {
    * Initialize: load all state from DB into memory cache.
    */
   async init(): Promise<void> {
-    await this.redis.connect().catch(() => {});
+    await this.redis.connect().catch((err: any) => {
+      logger.warn({ error: err?.message }, 'BayesianOptimizer: Redis connect failed — using DB only');
+    });
     
     try {
       // Create schema first (idempotent)
@@ -207,7 +209,9 @@ export class BayesianOptimizer {
     dists.set(hour, { alpha, beta });
 
     // Persist to DB (async, non-blocking)
-    this.persistState(pageId, category, hour, alpha, beta).catch(() => {});
+    this.persistState(pageId, category, hour, alpha, beta).catch((err: any) => {
+      logger.debug({ pageId, category, hour, error: err?.message }, 'BayesianOptimizer: persistState failed (non-critical)');
+    });
 
     logger.debug(
       { pageId, category, hour, engagementRate, alpha: alpha.toFixed(1), beta: beta.toFixed(1) },
